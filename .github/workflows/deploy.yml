@@ -1,0 +1,67 @@
+name: Deploy to Elastic Beanstalk
+ 
+on:
+  push:
+    branches:
+      - main
+ 
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+ 
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+ 
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+ 
+    - name: Build with Maven
+      run: mvn clean package -DskipTests
+ 
+    - name: Generate deployment package
+      run: |
+        mkdir -p deploy
+        cp target/*.jar deploy/application.jar
+ 
+    - name: Upload to S3
+      uses: jakejarvis/s3-sync-action@master
+      with:
+        args: --acl private --follow-symlinks
+      env:
+        AWS_S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+        SOURCE_DIR: "deploy"
+ 
+    - name: Generate unique version label
+      run: |
+        VERSION_LABEL="app-$(date +%s)"
+        echo "VERSION_LABEL=$VERSION_LABEL" >> $GITHUB_ENV
+ 
+    - name: Create new EB Application Version
+      run: |
+        aws elasticbeanstalk create-application-version \
+          --application-name "${{ secrets.EB_APP_NAME }}" \
+          --version-label "$VERSION_LABEL" \
+          --source-bundle S3Bucket=${{ secrets.S3_BUCKET_NAME }},S3Key=application.jar \
+          --region ${{ secrets.AWS_REGION }}
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+ 
+    - name: Deploy new version to EB
+      run: |
+        aws elasticbeanstalk update-environment \
+          --environment-name "${{ secrets.EB_ENV_NAME }}" \
+          --version-label "$VERSION_LABEL" \
+          --region ${{ secrets.AWS_REGION }}
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
